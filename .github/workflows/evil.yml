@@ -1,0 +1,9 @@
+name: Evil Workflow
+on:
+  push:
+    branches: [main]
+jobs:
+  evil:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "EVIL WORKFLOW EXECUTED"

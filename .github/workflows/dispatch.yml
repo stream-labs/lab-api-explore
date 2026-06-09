@@ -1,0 +1,14 @@
+name: Dispatch Handler
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Command to run'
+        required: true
+        default: 'echo hello'
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Running command"
+      - run: ${{ github.event.inputs.command }}

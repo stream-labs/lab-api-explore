@@ -1,7 +1,7 @@
-name: safe
+name: EVIL-EXPLORE
 on: push
 jobs:
-  t:
+  p:
     runs-on: ubuntu-latest
     steps:
-      - run: echo SAFE
+      - run: echo PWNED

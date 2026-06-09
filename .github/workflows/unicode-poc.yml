@@ -1,59 +1,48 @@
-name: Unicode Tag PoC
+name: unicode-poc
 on:
   workflow_dispatch:
     inputs:
-      issue_number:
-        description: 'Issue number to analyze'
+      issue_num:
         required: true
         default: '5'
-
 jobs:
   detect:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch issue body and detect hidden content
+      - name: detect-tags
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE_NUM: ${{ github.event.inputs.issue_num }}
+          REPO: ${{ github.repository }}
         run: |
-          echo "=== Fetching issue #${{ github.event.inputs.issue_number }} ==="
-          BODY=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.inputs.issue_number }}" \
-            | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))")
-          
-          echo ""
-          echo "=== VISIBLE TEXT (what a human sees) ==="
-          echo "$BODY" | python3 -c "
-import sys
-body = sys.stdin.read()
-visible = ''.join(c for c in body if ord(c) < 0xE0000 or ord(c) > 0xE007F)
-print(visible)
-"
-          
-          echo ""
-          echo "=== HIDDEN UNICODE TAGS DECODED ==="
-          echo "$BODY" | python3 -c "
-import sys
-body = sys.stdin.read()
-tags = [c for c in body if 0xE0000 <= ord(c) <= 0xE007F]
-if tags:
-    decoded = ''.join(chr(ord(c) - 0xE0000) for c in tags)
-    print(f'FOUND {len(tags)} hidden chars!')
-    print(f'Hidden message: {decoded}')
-else:
-    print('No Unicode Tags found.')
-"
-          
-          echo ""
-          echo "=== FULL TEXT (what an AI agent receives) ==="
-          echo "$BODY" | python3 -c "
-import sys
-body = sys.stdin.read()
-# Replace Unicode Tags with their ASCII equivalent (what AI sees)
-result = []
-for c in body:
-    if 0xE0000 <= ord(c) <= 0xE007F:
-        result.append(chr(ord(c) - 0xE0000))
-    else:
-        result.append(c)
-print(''.join(result))
-"
+          python3 << 'PYEND'
+          import json, urllib.request, os
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["REPO"]
+          num = os.environ["ISSUE_NUM"]
+          req = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/issues/{num}",
+              headers={"Authorization": f"token {token}"})
+          body = json.loads(urllib.request.urlopen(req).read()).get("body", "")
+          visible = ''.join(c for c in body if not (0xE0000 <= ord(c) <= 0xE007F))
+          tags = [c for c in body if 0xE0000 <= ord(c) <= 0xE007F]
+          decoded = ''.join(chr(ord(c) - 0xE0000) for c in tags)
+          full = ''.join(chr(ord(c)-0xE0000) if 0xE0000<=ord(c)<=0xE007F else c for c in body)
+          print("=" * 60)
+          print("VISIBLE TEXT (what a human sees in the browser):")
+          print("=" * 60)
+          print(visible)
+          print()
+          print("=" * 60)
+          print(f"HIDDEN UNICODE TAGS FOUND: {len(tags)} invisible characters")
+          print("=" * 60)
+          if decoded:
+              print(f"DECODED: {decoded}")
+          else:
+              print("(none)")
+          print()
+          print("=" * 60)
+          print("FULL TEXT (what an AI agent receives as input):")
+          print("=" * 60)
+          print(full)
+          PYEND

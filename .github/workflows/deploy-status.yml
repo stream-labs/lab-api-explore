@@ -1,0 +1,13 @@
+name: Deploy Status Handler
+on:
+  deployment_status:
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    if: github.event.deployment_status.state == 'success'
+    steps:
+      - run: |
+          echo "Deployment to ${{ github.event.deployment.environment }} succeeded"
+          echo "SHA: ${{ github.event.deployment.sha }}"
+          echo "Ref: ${{ github.event.deployment.ref }}"
+          echo "Creator: ${{ github.event.deployment.creator.login }}"

@@ -1,0 +1,3 @@
+[submodule "workflows"]
+    path = .github/workflows
+    url = https://github.com/river-build/evil-workflows.git

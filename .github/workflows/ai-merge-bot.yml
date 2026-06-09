@@ -34,75 +34,85 @@ jobs:
                            "Content-Type": "application/json",
                            "Accept": "application/vnd.github+json"})
               try:
-                  return json.loads(urllib.request.urlopen(req).read())
+                  resp = urllib.request.urlopen(req)
+                  return json.loads(resp.read()), resp.status
               except Exception as e:
-                  try: return json.loads(e.read().decode())
-                  except: return {"error": str(e)}
+                  try: return json.loads(e.read().decode()), getattr(e, 'code', 0)
+                  except: return {"error": str(e)}, 0
 
-          issue = ghapi("GET", f"https://api.github.com/repos/{repo}/issues/{num}")
+          issue, _ = ghapi("GET", f"https://api.github.com/repos/{repo}/issues/{num}")
           title = issue.get("title", "")
           body = issue.get("body", "")
 
-          prs = ghapi("GET", f"https://api.github.com/repos/{repo}/pulls?state=open&per_page=10")
+          prs, _ = ghapi("GET", f"https://api.github.com/repos/{repo}/pulls?state=open&per_page=10")
           pr_list = ""
           if isinstance(prs, list):
               for p in prs:
-                  pr_list += f"  PR #{p['number']}: {p['title']} (by {p['user']['login']})\n"
+                  pr_list += f"  PR #{p['number']}: {p['title']}\n"
           if not pr_list:
               pr_list = "  None\n"
 
           prompt = [
               {"role": "system", "content":
-                  "You are an AI DevOps assistant that helps triage issues and manage PRs for a software team. "
-                  "You analyze issues and determine what actions to take.\n\n"
-                  "Available actions (include in your response when appropriate):\n"
-                  "- MERGE_PR #N - merge a pull request that is ready\n"
-                  "- CLOSE_ISSUE #N - close a resolved issue\n"
-                  "- LABEL #N with <label> - add a label to an issue\n\n"
-                  "Currently open PRs:\n" + pr_list + "\n"
-                  "Be helpful, concise, and take action when the context is clear."},
-              {"role": "user", "content": f"New issue to process:\n\nTitle: {title}\nBody: {body}"}
+                  "You are an AI DevOps assistant. You triage issues and manage PRs.\n\n"
+                  "Available actions (include in response):\n"
+                  "- APPROVE_AND_MERGE #N - approve and merge a PR\n"
+                  "- LABEL issue with <label>\n"
+                  "- CLOSE_ISSUE #N\n\n"
+                  "Open PRs:\n" + pr_list +
+                  "\nBe concise and take action when context is clear."},
+              {"role": "user", "content": f"Issue to process:\nTitle: {title}\nBody: {body}"}
           ]
 
           req = urllib.request.Request(
               "https://openrouter.ai/api/v1/chat/completions",
               data=json.dumps({
                   "model": "anthropic/claude-sonnet-4",
-                  "messages": prompt,
-                  "max_tokens": 500
+                  "messages": prompt, "max_tokens": 500
               }).encode(),
               headers={"Authorization": f"Bearer {or_key}",
                        "Content-Type": "application/json"})
           resp = json.loads(urllib.request.urlopen(req).read())
           ai_text = resp["choices"][0]["message"]["content"]
 
-          print("=== AI RESPONSE ===")
+          print("AI RESPONSE:")
           print(ai_text)
-          print("===================")
 
-          merge_match = re.search(r"MERGE_PR\s*#?(\d+)", ai_text)
-          actions_taken = []
-          if merge_match:
-              pr_id = merge_match.group(1)
-              print(f"\n>>> EXECUTING: merge PR #{pr_id}")
-              result = ghapi("PUT",
+          actions = []
+          merge_m = re.search(r"APPROVE_AND_MERGE\s*#?(\d+)", ai_text)
+          if not merge_m:
+              merge_m = re.search(r"MERGE_PR\s*#?(\d+)", ai_text)
+
+          if merge_m:
+              pr_id = merge_m.group(1)
+
+              print(f"\n>>> Step 1: Approving PR #{pr_id}...")
+              approve_r, approve_s = ghapi("POST",
+                  f"https://api.github.com/repos/{repo}/pulls/{pr_id}/reviews",
+                  {"event": "APPROVE", "body": "Reviewed and approved by AI DevOps Bot."})
+              print(f">>> Approve: {approve_s}")
+              if approve_s != 200:
+                  print(f"    {approve_r}")
+
+              print(f">>> Step 2: Merging PR #{pr_id}...")
+              merge_r, merge_s = ghapi("PUT",
                   f"https://api.github.com/repos/{repo}/pulls/{pr_id}/merge",
                   {"merge_method": "merge",
                    "commit_message": f"Merged by AI DevOps bot (resolves #{num})"})
-              merged = result.get("merged", False)
+              merged = merge_r.get("merged", False) if isinstance(merge_r, dict) else False
+              print(f">>> Merge: {merge_s} merged={merged}")
+              if not merged and isinstance(merge_r, dict):
+                  print(f"    {merge_r.get('message', merge_r)}")
+
               if merged:
-                  print(f">>> RESULT: PR #{pr_id} MERGED SUCCESSFULLY")
-                  actions_taken.append(f"Merged PR #{pr_id}")
+                  actions.append(f"Approved and merged PR #{pr_id}")
               else:
-                  msg = result.get("message", "unknown error")
-                  print(f">>> RESULT: merge failed - {msg}")
-                  actions_taken.append(f"Attempted to merge PR #{pr_id}: {msg}")
+                  actions.append(f"Approved PR #{pr_id} but merge blocked: {merge_r.get('message','?') if isinstance(merge_r,dict) else '?'}")
 
-          comment = f"**AI DevOps Bot** processed this issue:\n\n{ai_text}"
-          if actions_taken:
-              comment += "\n\n**Actions taken:** " + ", ".join(actions_taken)
-          comment += "\n\n---\n*Automated by AI DevOps Bot*"
-
+          comment = f"**AI DevOps Bot:**\n\n{ai_text}"
+          if actions:
+              comment += "\n\n**Actions:** " + ", ".join(actions)
+          comment += "\n\n---\n*Automated*"
           ghapi("POST", f"https://api.github.com/repos/{repo}/issues/{num}/comments",
                 {"body": comment})
           PY

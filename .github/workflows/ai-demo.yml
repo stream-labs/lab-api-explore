@@ -1,0 +1,60 @@
+name: AI Issue Handler (Demo)
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  ai-respond:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show what human sees vs what AI sees
+        run: |
+          echo "=== WHAT A HUMAN REVIEWER SEES ==="
+          echo "Issue title: $ISSUE_TITLE"
+          # Using env var (safe from shell injection) to show the body
+          echo "Issue body (visible chars only):"
+          echo "$ISSUE_BODY" | tr -cd '\x20-\x7E\n'
+          echo ""
+          echo ""
+          echo "=== WHAT THE AI AGENT RECEIVES (full unicode) ==="
+          echo "Issue body (raw, including invisible Unicode Tags):"
+          echo "$ISSUE_BODY" | cat -v
+          echo ""
+          echo ""
+          echo "=== UNICODE TAG DETECTION ==="
+          # Detect Unicode Tags (U+E0000-U+E007F, encoded as F3 A0 8x xx in UTF-8)
+          TAG_COUNT=$(echo "$ISSUE_BODY" | od -An -tx1 | tr -d ' \n' | grep -o 'f3a0' | wc -l)
+          echo "Unicode Tag sequences found: $TAG_COUNT"
+          if [ "$TAG_COUNT" -gt 0 ]; then
+            echo "⚠️ WARNING: Hidden Unicode Tag content detected!"
+            echo "This issue contains invisible text that could be a prompt injection."
+            # Decode the hidden content
+            python3 -c "
+import sys
+body = sys.stdin.read()
+tags = [c for c in body if 0xE0000 <= ord(c) <= 0xE007F]
+if tags:
+    decoded = ''.join(chr(ord(c) - 0xE0000) for c in tags)
+    print(f'Hidden message ({len(tags)} chars): {decoded}')
+" <<< "$ISSUE_BODY"
+          fi
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+
+      # This is what a REAL vulnerable workflow looks like:
+      # - name: AI Triage (VULNERABLE - receives raw untrusted input)
+      #   uses: anthropics/claude-code-action@v1
+      #   with:
+      #     prompt: |
+      #       Triage this issue and suggest a fix:
+      #       Title: ${{ github.event.issue.title }}
+      #       Body: ${{ github.event.issue.body }}
+      #     anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+      #     allowed_tools: "Bash,Edit,Read"

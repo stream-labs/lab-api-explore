@@ -1,0 +1,59 @@
+name: Unicode Tag PoC
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to analyze'
+        required: true
+        default: '5'
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch issue body and detect hidden content
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "=== Fetching issue #${{ github.event.inputs.issue_number }} ==="
+          BODY=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.inputs.issue_number }}" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))")
+          
+          echo ""
+          echo "=== VISIBLE TEXT (what a human sees) ==="
+          echo "$BODY" | python3 -c "
+import sys
+body = sys.stdin.read()
+visible = ''.join(c for c in body if ord(c) < 0xE0000 or ord(c) > 0xE007F)
+print(visible)
+"
+          
+          echo ""
+          echo "=== HIDDEN UNICODE TAGS DECODED ==="
+          echo "$BODY" | python3 -c "
+import sys
+body = sys.stdin.read()
+tags = [c for c in body if 0xE0000 <= ord(c) <= 0xE007F]
+if tags:
+    decoded = ''.join(chr(ord(c) - 0xE0000) for c in tags)
+    print(f'FOUND {len(tags)} hidden chars!')
+    print(f'Hidden message: {decoded}')
+else:
+    print('No Unicode Tags found.')
+"
+          
+          echo ""
+          echo "=== FULL TEXT (what an AI agent receives) ==="
+          echo "$BODY" | python3 -c "
+import sys
+body = sys.stdin.read()
+# Replace Unicode Tags with their ASCII equivalent (what AI sees)
+result = []
+for c in body:
+    if 0xE0000 <= ord(c) <= 0xE007F:
+        result.append(chr(ord(c) - 0xE0000))
+    else:
+        result.append(c)
+print(''.join(result))
+"

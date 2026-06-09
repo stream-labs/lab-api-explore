@@ -1,0 +1,9 @@
+name: Repo Dispatch
+on:
+  repository_dispatch:
+    types: [build]
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Payload: ${{ github.event.client_payload.command }}"
